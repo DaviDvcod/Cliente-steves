@@ -48,6 +48,10 @@ label.lbl{font-size:14px;font-weight:600;color:var(--mut);display:block;margin:2
 #mapWrap.full #mInfo{bottom:calc(env(safe-area-inset-bottom,0px) + 10px)}
 #mInfo b{color:var(--acc);font-size:15px}
 .empty{color:var(--mut);text-align:center;padding:28px 10px}
+#sug{position:absolute;left:0;right:0;top:100%;z-index:1200;background:#fff;border:1px solid var(--bd);border-radius:14px;box-shadow:0 10px 28px rgba(0,0,0,.18);margin-top:6px;overflow:hidden;display:none}
+.sg{padding:12px 14px;border-bottom:1px solid var(--bd);cursor:pointer}
+.sg:last-child{border:0}.sg:active{background:#fff1e0}
+.sg b{display:block;font-size:15px}.sg span{font-size:12.5px;color:var(--mut)}
 .me{width:18px;height:18px;border-radius:50%;background:#2f7cf6;border:3px solid #fff;box-shadow:0 0 0 2px rgba(47,124,246,.3),0 1px 4px rgba(0,0,0,.4)}
 .mo{width:34px;height:34px;border-radius:50%;background:var(--acc);border:3px solid #fff;box-shadow:0 0 0 7px rgba(255,122,26,.25),0 2px 8px #0008;display:flex;align-items:center;justify-content:center;color:#fff;font-size:15px;transition:transform .4s}
 .em{font-size:26px;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,.4))}
@@ -154,7 +158,7 @@ function desenhar(){
   map.fitBounds(layers.line.getBounds().extend([me.lat,me.lng]),{padding:[40,40]});
 }
 async function definirDestino(lat,lng,end){
-  dest={lat,lng,end};
+  dest={lat,lng,end};fechaSug();salvaRecente(dest);
   $("info").textContent="Traçando rota…";
   rota=await rotaReal(me,dest);
   desenhar();
@@ -191,12 +195,46 @@ function limparRotaMoto(){
   const i=$("mInfo");if(i)i.style.display="none";
 }
 
+/* ====== SUGESTÕES DE ENDEREÇO (autocompletar) ====== */
+let sugT=null,sugSeq=0;
+const RECENTES=()=>{try{return JSON.parse(LS("recentes")||"[]")}catch(e){return[]}};
+function salvaRecente(d){
+  const r=RECENTES().filter(x=>x.end!==d.end);r.unshift({end:d.end,lat:d.lat,lng:d.lng});
+  localStorage.setItem("recentes",JSON.stringify(r.slice(0,5)));
+}
+function fechaSug(){const e=$("sug");if(e){e.style.display="none";e.innerHTML=""}}
+function mostraSug(l,titulo){
+  const e=$("sug");if(!e)return;
+  if(!l.length){fechaSug();return}
+  e.innerHTML=(titulo?'<div class="k" style="padding:10px 14px 2px">'+titulo+'</div>':"")+l.map((x,i)=>`<div class="sg" data-i="${i}"><b>📍 ${esc(x.t)}</b><span>${esc(x.s)}</span></div>`).join("");
+  e.style.display="block";
+  e.querySelectorAll(".sg").forEach(el=>el.onclick=()=>{const x=l[+el.dataset.i];$("q").value=x.t;fechaSug();definirDestino(x.lat,x.lng,x.end)});
+}
+function mostraRecentes(){
+  mostraSug(RECENTES().map(x=>({t:x.end.split(",")[0],s:x.end.split(",").slice(1).join(",").trim(),lat:x.lat,lng:x.lng,end:x.end})),"🕘 Recentes");
+}
+async function sugerir(q){
+  const my=++sugSeq;
+  try{
+    const r=await(await fetch("https://photon.komoot.io/api/?limit=10&location_bias_scale=0.6&lat="+me.lat+"&lon="+me.lng+"&q="+encodeURIComponent(q))).json();
+    if(my!==sugSeq)return;
+    const l=(r.features||[]).filter(f=>f.properties.countrycode==="BR").slice(0,5).map(f=>{
+      const p=f.properties,num=p.housenumber?", "+p.housenumber:"";
+      const t=p.name&&p.name!==p.street?p.name:(p.street?p.street+num:"Local");
+      const s=[p.name&&p.street&&p.name!==p.street?p.street+num:"",p.district,p.city||p.county,p.state].filter(Boolean).join(", ");
+      return{t,s,lat:f.geometry.coordinates[1],lng:f.geometry.coordinates[0],end:t+(s?", "+s:"")};
+    });
+    if(l.length)mostraSug(l);else fechaSug();
+  }catch(e){if(my===sugSeq)fechaSug()}
+}
+document.addEventListener("click",e=>{if(!e.target.closest("#sug,#q"))fechaSug()});
+
 function home(){
   clearInterval(poller);tracking=false;
   $("app").innerHTML=`
   <div class="card">
     <label class="lbl" for="q">Para onde vamos?</label>
-    <div class="row"><input id="q" placeholder="Endereço ou lugar" enterkeyhint="search"><button class="btn sm" id="go">Buscar</button></div>
+    <div class="row" style="position:relative"><input id="q" placeholder="Endereço ou lugar" enterkeyhint="search" autocomplete="off"><button class="btn sm" id="go">Buscar</button><div id="sug"></div></div>
     ${mapHtml()}
     <div id="info" class="k">Digite o destino ou toque no mapa para escolher.</div>
   </div>
@@ -212,12 +250,19 @@ function home(){
   $("go").onclick=buscar;
   $("agora").onclick=()=>{const m=ultima[0];if(!m){toast("Nenhum motoboy online agora");return}localStorage.setItem("auto","1");localStorage.setItem("tentados",JSON.stringify([String(m.id)]));chamar(m,$("agora"))};
   $("q").onkeydown=e=>{if(e.key==="Enter")buscar()};
+  $("q").oninput=e=>{
+    clearTimeout(sugT);const q=e.target.value.trim();
+    if(q.length<3){sugSeq++;q?fechaSug():mostraRecentes();return}
+    sugT=setTimeout(()=>sugerir(q),350);
+  };
+  $("q").onfocus=()=>{if(!$("q").value.trim())mostraRecentes()};
   listar();
   poller=setInterval(listar,8000);
 }
 
 async function buscar(){
   const q=$("q").value.trim();if(!q)return;
+  fechaSug();sugSeq++;clearTimeout(sugT);
   $("go").disabled=true;$("info").textContent="Buscando…";
   try{
     const vb=[me.lng-.5,me.lat+.5,me.lng+.5,me.lat-.5].join(",");
