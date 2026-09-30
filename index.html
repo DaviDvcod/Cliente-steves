@@ -58,7 +58,8 @@ label.lbl{font-size:14px;font-weight:600;color:var(--mut);display:block;margin:2
 a.wa{color:var(--ok);text-decoration:none;font-weight:600}
 #toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);background:var(--tx);color:#fff;padding:11px 18px;border-radius:12px;font-size:14px;font-weight:600;opacity:0;transition:.25s;z-index:2000;pointer-events:none;max-width:88vw;text-align:center}
 #toast.show{transform:translate(-50%,0);opacity:1}
-.tps{display:grid;grid-template-columns:1fr 1fr;gap:8px}.tp{min-height:64px;border:2px solid var(--bd);border-radius:14px;background:transparent;color:inherit;font:inherit;font-weight:700;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}.tp span{font-size:22px}.tp small{font-weight:500;font-size:12px;opacity:.7}.tp.on{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 12%,transparent)}
+.tps{display:grid;grid-template-columns:1fr 1fr;gap:8px}.tp,.pt{min-height:64px;border:2px solid var(--bd);border-radius:14px;background:transparent;color:inherit;font:inherit;font-weight:700;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}.tp span,.pt span{font-size:22px}.tp small,.pt small{font-weight:500;font-size:12px;opacity:.7}.tp.on,.pt.on{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 12%,transparent)}
+.tps>*{min-width:0}.pt{padding:6px 8px;min-height:60px}.pt small{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style>
 </head>
 <body>
@@ -133,12 +134,14 @@ const CAMADAS=[
   {n:"Satélite",u:"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",z:18}
 ];
 const TIPOS={passageiro:{ico:"🧍",nome:"Passageiro",dest:"Para onde vamos?",btn:"🚀 Pedir moto agora"},entrega:{ico:"📦",nome:"Entrega",dest:"Para onde entregar?",btn:"📦 Pedir entrega agora"}};
-let tipo=TIPOS[LS("cli_tipo")]?LS("cli_tipo"):"passageiro";
-async function criarCorrida(b){try{return await api("corridas",{method:"POST",body:JSON.stringify(b)})}catch(e){if(/tipo/.test(e.message)){delete b.tipo;return api("corridas",{method:"POST",body:JSON.stringify(b)})}throw e}}
+let tipo=TIPOS[LS("cli_tipo")]?LS("cli_tipo"):"passageiro",orig=null,alvo="dest";
+async function criarCorrida(b){for(;;){try{return await api("corridas",{method:"POST",body:JSON.stringify(b)})}catch(e){const k=["tipo","origem_end","origem_lat","origem_lng"].find(x=>x in b&&e.message.includes(x));if(!k)throw e;delete b[k]}}}
+const origemDe=()=>{const o=orig||{lat:me.lat,lng:me.lng,end:"Minha localização"};return{origem_end:o.end,origem_lat:o.lat,origem_lng:o.lng}};
 let ultima=[],reenviando=false,me={lat:-27.816,lng:-50.326},map=null,layers={},dest=null,rota=null,poller=null,anim=null;
 let lay=+LS("cli_lay")||0,tile=null,tracking=false,follow=false,rmBusy=false,rmFrom=null;
 const icoMe=L.divIcon({html:'<div class="me"></div>',className:"",iconSize:[18,18],iconAnchor:[9,9]});
 const icoFlag=L.divIcon({html:'<div class="em">🏁</div>',className:"",iconSize:[30,30],iconAnchor:[6,28]});
+const icoOrig=L.divIcon({html:'<div class="em">🟢</div>',className:"",iconSize:[30,30],iconAnchor:[15,15]});
 const icoMoto=L.divIcon({html:'<div class="em">🏍️</div>',className:"",iconSize:[30,30],iconAnchor:[15,15]});
 const icoArrow=L.divIcon({html:'<div class="mo">▲</div>',className:"",iconSize:[34,34],iconAnchor:[17,17]});
 const mapHtml=()=>`<div id="mapWrap"><div id="map"></div><button class="mb" id="bFull" aria-label="Tela cheia">⤢</button><button class="mb" id="bLay" aria-label="Trocar mapa">🗺️</button><button class="mb" id="bCen" aria-label="Centralizar">🎯</button><div id="mInfo"></div></div>`;
@@ -197,17 +200,40 @@ function desenhar(){
     layers.line=L.polyline(rota.pts,{color:"#ff7a1a",weight:5,opacity:.95,lineCap:"round",lineJoin:"round"}).addTo(map);
   }
   layers.flag=L.marker([dest.lat,dest.lng],{icon:icoFlag}).addTo(map);
+  marcaOrig();
   map.fitBounds(layers.line.getBounds().extend([me.lat,me.lng]),{padding:[40,40]});
 }
-async function definirDestino(lat,lng,end){
-  dest={lat,lng,end};fechaSug();salvaRecente(dest);
+function marcaOrig(){
+  if(!map)return;
+  if(layers.org){map.removeLayer(layers.org);delete layers.org}
+  if(orig){layers.org=L.marker([orig.lat,orig.lng],{icon:icoOrig}).addTo(map);if(!dest)map.setView([orig.lat,orig.lng],15)}
+}
+function pontosUI(){
+  document.querySelectorAll(".tp").forEach(b=>b.classList.toggle("on",b.dataset.t===tipo));
+  if(!$("pO"))return;
+  $("pOt").textContent=tipo==="entrega"?"Coleta":"Embarque";
+  $("pOs").textContent=orig?orig.end:"Minha localização";
+  $("pDs").textContent=dest?dest.end:"Escolha abaixo";
+  $("pO").classList.toggle("on",alvo==="orig");$("pD").classList.toggle("on",alvo==="dest");
+  $("qLbl").textContent=alvo==="orig"?(tipo==="entrega"?"Onde coletar o item?":"Onde você vai embarcar?"):TIPOS[tipo].dest;
+  $("agora").textContent=TIPOS[tipo].btn;
+}
+async function tracar(){
+  marcaOrig();
+  if(!dest){$("info").textContent="Agora escolha o destino final.";return}
   $("info").textContent="Traçando rota…";
-  rota=await rotaReal(me,dest);
+  rota=await rotaReal(orig||me,dest);
   desenhar();
   $("info").innerHTML=`🛣️ ${rota.km.toFixed(1)} km de rota${rota.min?` · 🕐 ~${rota.min} min`:""} até ${esc(dest.end)}`;
   listar();
   if($("agora"))$("agora").disabled=false;
   if($("ofBox"))$("ofBox").style.display="block";
+}
+async function definirDestino(lat,lng,end){
+  const pt={lat,lng,end};fechaSug();salvaRecente(pt);
+  if(alvo==="orig")orig=pt;else dest=pt;
+  alvo="dest";pontosUI();
+  await tracar();
 }
 function mover(p){
   if(!layers.moto){layers.moto=L.marker(p,{icon:icoArrow,zIndexOffset:1000}).addTo(map);return}
@@ -218,11 +244,11 @@ function mover(p){
   const f=t=>{const k=Math.min(1,(t-t0)/1500);layers.moto.setLatLng([a.lat+(p[0]-a.lat)*k,a.lng+(p[1]-a.lng)*k]);if(k<1)anim=requestAnimationFrame(f)};
   anim=requestAnimationFrame(f);
 }
-async function rotaMoto(m){
-  if(rmBusy||!dest)return;
+async function rotaMoto(m,t,rot){
+  if(rmBusy||!t)return;
   if(rmFrom&&hav(m.lat,m.lng,rmFrom[0],rmFrom[1])<.1)return;
   rmBusy=true;
-  const r=await rotaReal({lat:+m.lat,lng:+m.lng},dest);
+  const r=await rotaReal({lat:+m.lat,lng:+m.lng},t);
   rmBusy=false;
   if(!map)return;
   rmFrom=[+m.lat,+m.lng];
@@ -231,7 +257,7 @@ async function rotaMoto(m){
     layers.rmG=L.polyline(r.pts,{color:"#ff7a1a",weight:12,opacity:.25,lineCap:"round"}).addTo(map);
     layers.rm=L.polyline(r.pts,{color:"#ff7a1a",weight:5,opacity:.95,lineCap:"round",lineJoin:"round"}).addTo(map);
   }
-  const i=$("mInfo");if(i){i.innerHTML=`<b>${r.km.toFixed(1)} km</b>${r.min?` · ~${r.min} min`:""} até o destino`;i.style.display="block"}
+  const i=$("mInfo");if(i){i.innerHTML=`<b>${r.km.toFixed(1)} km</b>${r.min?` · ~${r.min} min`:""} até ${rot||"o destino"}`;i.style.display="block"}
 }
 function limparRotaMoto(){
   ["rm","rmG"].forEach(k=>{if(layers[k]){map.removeLayer(layers[k]);delete layers[k]}});
@@ -277,6 +303,7 @@ function home(){
   $("app").innerHTML=`
   <div class="card"><div class="tps"><button class="tp" data-t="passageiro"><span>🧍</span>Passageiro<small>Levar você</small></button><button class="tp" data-t="entrega"><span>📦</span>Entrega<small>Levar um item</small></button></div></div>
   <div class="card">
+    <div class="tps" style="margin-bottom:12px"><button class="pt" id="pO"><span>🟢</span><b id="pOt">Embarque</b><small id="pOs">Minha localização</small></button><button class="pt" id="pD"><span>🏁</span><b>Destino final</b><small id="pDs">Escolha abaixo</small></button></div>
     <label class="lbl" for="q" id="qLbl">Para onde vamos?</label>
     <div class="row" style="position:relative"><input id="q" placeholder="Endereço ou lugar" enterkeyhint="search" autocomplete="off"><button class="btn sm" id="go">Buscar</button><div id="sug"></div></div>
     ${mapHtml()}
@@ -290,10 +317,11 @@ function home(){
   <button class="btn" id="agora" style="margin-bottom:12px" disabled>🚀 Pedir moto agora</button>
   <div class="sec">🏍️ Motoboys disponíveis</div>
   <div id="lista"><div class="empty">Procurando motoboys…</div></div>${histHtml()}`;
-  dest=null;rota=null;
-  const aplicaTipo=()=>{document.querySelectorAll(".tp").forEach(b=>b.classList.toggle("on",b.dataset.t===tipo));$("qLbl").textContent=TIPOS[tipo].dest;$("agora").textContent=TIPOS[tipo].btn};
-  document.querySelectorAll(".tp").forEach(b=>b.onclick=()=>{tipo=b.dataset.t;localStorage.setItem("cli_tipo",tipo);aplicaTipo()});
-  aplicaTipo();
+  dest=null;rota=null;orig=null;alvo="dest";
+  document.querySelectorAll(".tp").forEach(b=>b.onclick=()=>{tipo=b.dataset.t;localStorage.setItem("cli_tipo",tipo);pontosUI()});
+  $("pO").onclick=()=>{if(alvo==="orig"){orig=null;alvo="dest";pontosUI();tracar()}else{alvo="orig";pontosUI();$("info").textContent="Busque ou toque no mapa. Toque em Embarque/Coleta de novo para usar sua localização.";$("q").focus()}};
+  $("pD").onclick=()=>{alvo="dest";pontosUI();$("q").focus()};
+  pontosUI();
   initMap();
   $("go").onclick=buscar;
   $("agora").onclick=()=>{const m=ultima[0];if(!m){toast("Nenhum motoboy online agora");return}localStorage.setItem("auto","1");localStorage.setItem("tentados",JSON.stringify([String(m.id)]));chamar(m,$("agora"))};
@@ -347,7 +375,7 @@ async function chamar(m,btn){
   localStorage.setItem("cli_nome",nome);localStorage.setItem("cli_tel",tel);localStorage.setItem("oferta",+($("oferta")&&$("oferta").value)>0?"1":"0");
   btn.disabled=true;btn.textContent="Chamando…";
   try{
-    const r=await criarCorrida({motoboy_id:m.id,cliente_nome:nome,cliente_tel:tel,destino_end:dest.end,destino_lat:dest.lat,destino_lng:dest.lng,distancia_km:+rota.km.toFixed(2),valor:valorPara(m),status:"pendente",tipo});
+    const r=await criarCorrida({motoboy_id:m.id,cliente_nome:nome,cliente_tel:tel,destino_end:dest.end,destino_lat:dest.lat,destino_lng:dest.lng,distancia_km:+rota.km.toFixed(2),valor:valorPara(m),status:"pendente",tipo,...origemDe()});
     localStorage.setItem("corrida_id",r[0].id);
     acompanhar();
   }catch(e){
@@ -367,7 +395,7 @@ function acompanhar(){
     ${mapHtml()}
     <div id="dt"></div><div id="prop"></div><div id="ac" style="margin-top:12px"></div></div>`;
   initMap();
-  let lastSt=null,fit=false,telM=null;
+  let lastSt=null,fit=false,telM=null,faseK=null;
   const tick=async()=>{
     let c,m=null;
     try{c=(await api("corridas?id=eq."+encodeURIComponent(id)+"&select=*"))[0]}catch(e){return}
@@ -379,12 +407,14 @@ function acompanhar(){
     }
     if(!dest){
       dest={lat:+c.destino_lat,lng:+c.destino_lng,end:c.destino_end};
-      rota=await rotaReal(me,dest);desenhar();
+      orig=c.origem_lat!=null?{lat:+c.origem_lat,lng:+c.origem_lng,end:c.origem_end||"Embarque"}:null;
+      rota=await rotaReal(orig||me,dest);desenhar();
     }
     try{m=(await api("motoboys?id=eq."+encodeURIComponent(c.motoboy_id)+"&select=id,nome,preco_km,lat,lng,atualizado_em"))[0]}catch(e){}
     if(!telM&&["aceita","a_caminho"].includes(c.status)){try{telM=await api("rpc/telefone_motoboy",{method:"POST",body:JSON.stringify({p_corrida:c.id})})}catch(e){}}
     if(m&&telM)m.telefone=telM;
-    const [txt,cls]=ST[c.status]||[c.status,"warn"];
+    let [txt,cls]=ST[c.status]||[c.status,"warn"];
+    if(c.status==="a_caminho"&&c.origem_lat!=null)txt=c.coletado_em?(c.tipo==="entrega"?"📦 Item coletado · indo ao destino":"🧍 Em viagem · indo ao destino"):(c.tipo==="entrega"?"🏍️ A caminho da coleta":"🏍️ A caminho do embarque");
     $("st").textContent=txt;$("st").className="pill "+cls;
     $("vl").textContent=brl(c.valor);
     const pr=$("prop");
@@ -400,11 +430,11 @@ function acompanhar(){
     }else{pr.innerHTML="";pr.dataset.k=""}
     const wa=m&&m.telefone?` · <a class="wa" target="_blank" rel="noopener" href="https://wa.me/${soDig(m.telefone)}">💬 Falar com o motoboy</a>`:"";
     const T=TIPOS[c.tipo]||TIPOS.passageiro;
-    $("dt").innerHTML=`<div class="k">${T.ico} ${T.nome} · 📍 ${esc(c.destino_end||"")}</div><div class="k">${(+c.distancia_km).toFixed(1)} km${m?" · "+esc(m.nome):""}${wa}</div>`;
+    $("dt").innerHTML=`<div class="k">${T.ico} ${T.nome}</div>${c.origem_end?`<div class="k">🟢 ${esc(c.origem_end)}</div>`:""}<div class="k">🏁 ${esc(c.destino_end||"")}</div><div class="k">${(+c.distancia_km).toFixed(1)} km${m?" · "+esc(m.nome):""}${wa}</div>`;
     if(m&&m.lat!=null&&m.lng!=null&&["aceita","a_caminho","pendente"].includes(c.status)){
       mover([+m.lat,+m.lng]);
       if(!fit){fit=true;map.fitBounds(L.latLngBounds([[me.lat,me.lng],[dest.lat,dest.lng],[+m.lat,+m.lng]]),{padding:[40,40]})}
-      if(c.status!=="pendente")rotaMoto(m);
+      if(c.status!=="pendente"){const ir=orig&&!c.coletado_em,fk=ir?"o":"d";if(fk!==faseK){faseK=fk;rmFrom=null;limparRotaMoto()}rotaMoto(m,ir?orig:dest,ir?(c.tipo==="entrega"?"a coleta":"o embarque"):"o destino")}
     }
     if(c.status!==lastSt){
       lastSt=c.status;
@@ -454,7 +484,7 @@ async function reenviar(c){
     const m=l[0];
     if(!m){localStorage.setItem("auto","0");toast("Nenhum motoboy disponível agora");return}
     t.push(String(m.id));localStorage.setItem("tentados",JSON.stringify(t));
-    const r=await criarCorrida({motoboy_id:m.id,cliente_nome:c.cliente_nome,cliente_tel:c.cliente_tel,destino_end:c.destino_end,destino_lat:c.destino_lat,destino_lng:c.destino_lng,distancia_km:c.distancia_km,valor:LS("oferta")==="1"?+c.valor:+(c.distancia_km*m.preco_km).toFixed(2),status:"pendente",tipo:c.tipo||"passageiro"});
+    const r=await criarCorrida({motoboy_id:m.id,cliente_nome:c.cliente_nome,cliente_tel:c.cliente_tel,destino_end:c.destino_end,destino_lat:c.destino_lat,destino_lng:c.destino_lng,distancia_km:c.distancia_km,valor:LS("oferta")==="1"?+c.valor:+(c.distancia_km*m.preco_km).toFixed(2),status:"pendente",tipo:c.tipo||"passageiro",origem_end:c.origem_end,origem_lat:c.origem_lat,origem_lng:c.origem_lng});
     localStorage.setItem("corrida_id",r[0].id);dest=null;toast("Procurando outro motoboy…");acompanhar();
   }catch(e){}finally{reenviando=false}
 }
