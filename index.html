@@ -150,7 +150,9 @@ async function enderecoMe(){
   if(ok)meEnd={lat:me.lat,lng:me.lng,end};
   return end;
 }
-const origemDe=async()=>({origem_end:await enderecoMe(),origem_lat:me.lat,origem_lng:me.lng});
+const numDe=id=>($(id)&&$(id).value)||"";
+function comNum(end,n){n=(n||"").trim();if(!n)return end;const p=end.split(/,| - /).map(x=>x.trim()).filter(x=>x&&!/^\d+[a-zA-Z]?$/.test(x));return p.length?p[0]+", "+n+(p.length>1?" - "+p.slice(1).join(", "):""):end}
+const origemDe=async()=>({origem_end:comNum(await enderecoMe(),numDe("nOrig")),origem_lat:me.lat,origem_lng:me.lng});
 let ultima=[],reenviando=false,me={lat:-27.816,lng:-50.326},map=null,layers={},dest=null,rota=null,poller=null,anim=null;
 let lay=+LS("cli_lay")||0,tile=null,tracking=false,follow=false,rmBusy=false,rmFrom=null;
 const icoMe=L.divIcon({html:'<div class="me"></div>',className:"",iconSize:[18,18],iconAnchor:[9,9]});
@@ -313,6 +315,7 @@ function home(){
   <div class="card">
     <label class="lbl" for="q" id="qLbl">Para onde vamos?</label>
     <div class="row" style="position:relative"><input id="q" placeholder="Endereço ou lugar" enterkeyhint="search" autocomplete="off"><button class="btn sm" id="go">Buscar</button><div id="sug"></div></div>
+    <div class="tps" style="margin-top:10px"><input id="nOrig" inputmode="text" maxlength="14" placeholder="Nº onde você está" aria-label="Número onde você está"><input id="nDest" inputmode="text" maxlength="14" placeholder="Nº do destino" aria-label="Número do destino"></div>
     ${mapHtml()}
     <div id="info" class="k">Digite o destino ou toque no mapa para escolher.</div>
     <div id="ofBox" style="display:none;margin-top:10px"><label class="lbl">💬 Quer oferecer outro valor? (opcional)</label><input id="oferta" type="number" step="0.5" min="1" inputmode="decimal" placeholder="Ex.: 12,00 · vazio usa o preço do motoboy"></div>
@@ -381,7 +384,7 @@ async function chamar(m,btn){
   btn.disabled=true;btn.textContent="Chamando…";
   try{
     const og=await origemDe();
-    const r=await criarCorrida({motoboy_id:m.id,cliente_nome:nome,cliente_tel:tel,destino_end:dest.end,destino_lat:dest.lat,destino_lng:dest.lng,distancia_km:+rota.km.toFixed(2),valor:valorPara(m),status:"pendente",tipo,...og});
+    const r=await criarCorrida({motoboy_id:m.id,cliente_nome:nome,cliente_tel:tel,destino_end:comNum(dest.end,numDe("nDest")),destino_lat:dest.lat,destino_lng:dest.lng,distancia_km:+rota.km.toFixed(2),valor:valorPara(m),status:"pendente",tipo,...og});
     localStorage.setItem("corrida_id",r[0].id);
     acompanhar();
   }catch(e){
