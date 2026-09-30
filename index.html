@@ -61,6 +61,9 @@ a.wa{color:var(--ok);text-decoration:none;font-weight:600}
 <main id="app"></main>
 <div id="toast"></div>
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.0.20/leaflet-maplibre-gl.js"></script>
 <script>
 "use strict";
 const SB="https://bkjywijgogeyekwgqawq.supabase.co",KEY="sb_publishable_v8SlYZngr9uQ0vpBxlPDPg_GBKN_-Or";
@@ -81,8 +84,9 @@ const soDig=t=>{const d=String(t||"").replace(/\D/g,"");return d.length<=11?"55"
 
 /* ====== MAPA AVANÇADO ====== */
 const CAMADAS=[
-  {n:"Claro",u:"https://tile.openstreetmap.org/{z}/{x}/{y}.png",z:19},
-  {n:"Escuro",u:"https://tile.openstreetmap.org/{z}/{x}/{y}.png",dk:1,z:19},
+  {n:"Ruas",gl:"https://tiles.openfreemap.org/styles/liberty"},
+  {n:"Claro",gl:"https://tiles.openfreemap.org/styles/positron"},
+  {n:"Escuro",gl:"https://tiles.openfreemap.org/styles/dark",dk:1},
   {n:"Satélite",u:"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",z:18}
 ];
 let ultima=[],reenviando=false,me={lat:-27.816,lng:-50.326},map=null,layers={},dest=null,rota=null,poller=null,anim=null;
@@ -95,16 +99,18 @@ const mapHtml=()=>`<div id="mapWrap"><div id="map"></div><button class="mb" id="
 
 function setLayer(i){
   lay=(i+CAMADAS.length)%CAMADAS.length;localStorage.setItem("cli_lay",lay);
-  const c=CAMADAS[lay];
+  const c=CAMADAS[lay];let gl=false;
   if(tile)map.removeLayer(tile);
-  tile=L.tileLayer(c.u,{maxZoom:c.z,maxNativeZoom:c.z,attribution:"© OpenStreetMap / Esri"}).addTo(map);
-  tile.bringToBack();
-  $("map").classList.toggle("dk",!!c.dk);
+  tile=null;
+  if(c.gl&&L.maplibreGL){try{tile=L.maplibreGL({style:c.gl,attribution:"© OpenFreeMap © OpenMapTiles Dados © OpenStreetMap"}).addTo(map);gl=true}catch(e){tile=null}}
+  if(!tile)tile=L.tileLayer(c.u||"https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:c.z||19,maxNativeZoom:c.z||19,attribution:"© OpenStreetMap / Esri"}).addTo(map);
+  if(tile.bringToBack)tile.bringToBack();
+  $("map").classList.toggle("dk",!gl&&!!c.dk);
 }
 function initMap(){
   if(map){map.remove();map=null}
   layers={};rmFrom=null;follow=false;
-  map=L.map("map",{zoomControl:false,zoomSnap:.5,preferCanvas:true}).setView([me.lat,me.lng],14);
+  map=L.map("map",{zoomControl:false,zoomSnap:.5,minZoom:3,preferCanvas:true}).setView([me.lat,me.lng],14);
   map.attributionControl.setPrefix(false);
   setLayer(lay);
   L.control.scale({imperial:false,position:"bottomleft"}).addTo(map);
