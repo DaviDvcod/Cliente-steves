@@ -58,6 +58,7 @@ label.lbl{font-size:14px;font-weight:600;color:var(--mut);display:block;margin:2
 a.wa{color:var(--ok);text-decoration:none;font-weight:600}
 #toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);background:var(--tx);color:#fff;padding:11px 18px;border-radius:12px;font-size:14px;font-weight:600;opacity:0;transition:.25s;z-index:2000;pointer-events:none;max-width:88vw;text-align:center}
 #toast.show{transform:translate(-50%,0);opacity:1}
+.tps{display:grid;grid-template-columns:1fr 1fr;gap:8px}.tp{min-height:64px;border:2px solid var(--bd);border-radius:14px;background:transparent;color:inherit;font:inherit;font-weight:700;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}.tp span{font-size:22px}.tp small{font-weight:500;font-size:12px;opacity:.7}.tp.on{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 12%,transparent)}
 </style>
 </head>
 <body>
@@ -131,6 +132,9 @@ const CAMADAS=[
   {n:"Escuro",gl:"https://tiles.openfreemap.org/styles/dark",dk:1},
   {n:"Satélite",u:"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",z:18}
 ];
+const TIPOS={passageiro:{ico:"🧍",nome:"Passageiro",dest:"Para onde vamos?",btn:"🚀 Pedir moto agora"},entrega:{ico:"📦",nome:"Entrega",dest:"Para onde entregar?",btn:"📦 Pedir entrega agora"}};
+let tipo=TIPOS[LS("cli_tipo")]?LS("cli_tipo"):"passageiro";
+async function criarCorrida(b){try{return await api("corridas",{method:"POST",body:JSON.stringify(b)})}catch(e){if(/tipo/.test(e.message)){delete b.tipo;return api("corridas",{method:"POST",body:JSON.stringify(b)})}throw e}}
 let ultima=[],reenviando=false,me={lat:-27.816,lng:-50.326},map=null,layers={},dest=null,rota=null,poller=null,anim=null;
 let lay=+LS("cli_lay")||0,tile=null,tracking=false,follow=false,rmBusy=false,rmFrom=null;
 const icoMe=L.divIcon({html:'<div class="me"></div>',className:"",iconSize:[18,18],iconAnchor:[9,9]});
@@ -271,8 +275,9 @@ document.addEventListener("click",e=>{if(!e.target.closest("#sug,#q"))fechaSug()
 function home(){
   clearInterval(poller);tracking=false;
   $("app").innerHTML=`
+  <div class="card"><div class="tps"><button class="tp" data-t="passageiro"><span>🧍</span>Passageiro<small>Levar você</small></button><button class="tp" data-t="entrega"><span>📦</span>Entrega<small>Levar um item</small></button></div></div>
   <div class="card">
-    <label class="lbl" for="q">Para onde vamos?</label>
+    <label class="lbl" for="q" id="qLbl">Para onde vamos?</label>
     <div class="row" style="position:relative"><input id="q" placeholder="Endereço ou lugar" enterkeyhint="search" autocomplete="off"><button class="btn sm" id="go">Buscar</button><div id="sug"></div></div>
     ${mapHtml()}
     <div id="info" class="k">Digite o destino ou toque no mapa para escolher.</div>
@@ -286,6 +291,9 @@ function home(){
   <div class="sec">🏍️ Motoboys disponíveis</div>
   <div id="lista"><div class="empty">Procurando motoboys…</div></div>${histHtml()}`;
   dest=null;rota=null;
+  const aplicaTipo=()=>{document.querySelectorAll(".tp").forEach(b=>b.classList.toggle("on",b.dataset.t===tipo));$("qLbl").textContent=TIPOS[tipo].dest;$("agora").textContent=TIPOS[tipo].btn};
+  document.querySelectorAll(".tp").forEach(b=>b.onclick=()=>{tipo=b.dataset.t;localStorage.setItem("cli_tipo",tipo);aplicaTipo()});
+  aplicaTipo();
   initMap();
   $("go").onclick=buscar;
   $("agora").onclick=()=>{const m=ultima[0];if(!m){toast("Nenhum motoboy online agora");return}localStorage.setItem("auto","1");localStorage.setItem("tentados",JSON.stringify([String(m.id)]));chamar(m,$("agora"))};
@@ -339,7 +347,7 @@ async function chamar(m,btn){
   localStorage.setItem("cli_nome",nome);localStorage.setItem("cli_tel",tel);localStorage.setItem("oferta",+($("oferta")&&$("oferta").value)>0?"1":"0");
   btn.disabled=true;btn.textContent="Chamando…";
   try{
-    const r=await api("corridas",{method:"POST",body:JSON.stringify({motoboy_id:m.id,cliente_nome:nome,cliente_tel:tel,destino_end:dest.end,destino_lat:dest.lat,destino_lng:dest.lng,distancia_km:+rota.km.toFixed(2),valor:valorPara(m),status:"pendente"})});
+    const r=await criarCorrida({motoboy_id:m.id,cliente_nome:nome,cliente_tel:tel,destino_end:dest.end,destino_lat:dest.lat,destino_lng:dest.lng,distancia_km:+rota.km.toFixed(2),valor:valorPara(m),status:"pendente",tipo});
     localStorage.setItem("corrida_id",r[0].id);
     acompanhar();
   }catch(e){
@@ -391,7 +399,8 @@ function acompanhar(){
       }
     }else{pr.innerHTML="";pr.dataset.k=""}
     const wa=m&&m.telefone?` · <a class="wa" target="_blank" rel="noopener" href="https://wa.me/${soDig(m.telefone)}">💬 Falar com o motoboy</a>`:"";
-    $("dt").innerHTML=`<div class="k">📍 ${esc(c.destino_end||"")}</div><div class="k">${(+c.distancia_km).toFixed(1)} km${m?" · "+esc(m.nome):""}${wa}</div>`;
+    const T=TIPOS[c.tipo]||TIPOS.passageiro;
+    $("dt").innerHTML=`<div class="k">${T.ico} ${T.nome} · 📍 ${esc(c.destino_end||"")}</div><div class="k">${(+c.distancia_km).toFixed(1)} km${m?" · "+esc(m.nome):""}${wa}</div>`;
     if(m&&m.lat!=null&&m.lng!=null&&["aceita","a_caminho","pendente"].includes(c.status)){
       mover([+m.lat,+m.lng]);
       if(!fit){fit=true;map.fitBounds(L.latLngBounds([[me.lat,me.lng],[dest.lat,dest.lng],[+m.lat,+m.lng]]),{padding:[40,40]})}
@@ -445,7 +454,7 @@ async function reenviar(c){
     const m=l[0];
     if(!m){localStorage.setItem("auto","0");toast("Nenhum motoboy disponível agora");return}
     t.push(String(m.id));localStorage.setItem("tentados",JSON.stringify(t));
-    const r=await api("corridas",{method:"POST",body:JSON.stringify({motoboy_id:m.id,cliente_nome:c.cliente_nome,cliente_tel:c.cliente_tel,destino_end:c.destino_end,destino_lat:c.destino_lat,destino_lng:c.destino_lng,distancia_km:c.distancia_km,valor:LS("oferta")==="1"?+c.valor:+(c.distancia_km*m.preco_km).toFixed(2),status:"pendente"})});
+    const r=await criarCorrida({motoboy_id:m.id,cliente_nome:c.cliente_nome,cliente_tel:c.cliente_tel,destino_end:c.destino_end,destino_lat:c.destino_lat,destino_lng:c.destino_lng,distancia_km:c.distancia_km,valor:LS("oferta")==="1"?+c.valor:+(c.distancia_km*m.preco_km).toFixed(2),status:"pendente",tipo:c.tipo||"passageiro"});
     localStorage.setItem("corrida_id",r[0].id);dest=null;toast("Procurando outro motoboy…");acompanhar();
   }catch(e){}finally{reenviando=false}
 }
@@ -460,12 +469,12 @@ function ligarEstrelas(id){
 function guardarHist(c){
   if(c.status!=="concluida")return;
   const h=JSON.parse(LS("hist")||"[]");if(h.some(x=>x.id===c.id))return;
-  h.unshift({id:c.id,end:c.destino_end,valor:c.valor,km:c.distancia_km,data:c.atualizado_em||new Date().toISOString()});
+  h.unshift({id:c.id,tipo:c.tipo,end:c.destino_end,valor:c.valor,km:c.distancia_km,data:c.atualizado_em||new Date().toISOString()});
   localStorage.setItem("hist",JSON.stringify(h.slice(0,20)));
 }
 function histHtml(){
   const h=JSON.parse(LS("hist")||"[]");if(!h.length)return"";
-  return '<div class="sec">🧾 Minhas corridas</div>'+h.map(c=>`<div class="card"><div class="row"><b>${brl(c.valor)}</b><span class="k">${new Date(c.data).toLocaleDateString("pt-BR")}</span></div><div class="k">📍 ${esc(c.end)} · ${(+c.km).toFixed(1)} km</div></div>`).join("");
+  return '<div class="sec">🧾 Minhas corridas</div>'+h.map(c=>`<div class="card"><div class="row"><b>${brl(c.valor)}</b><span class="k">${new Date(c.data).toLocaleDateString("pt-BR")}</span></div><div class="k">${(TIPOS[c.tipo]||TIPOS.passageiro).ico} ${esc(c.end)} · ${(+c.km).toFixed(1)} km</div></div>`).join("");
 }
 function start(){LS("corrida_id")?acompanhar():home()}
 function vigiar(){
