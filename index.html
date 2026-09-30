@@ -136,7 +136,21 @@ const CAMADAS=[
 const TIPOS={passageiro:{ico:"🧍",nome:"Passageiro",dest:"Para onde vamos?",btn:"🚀 Pedir moto agora"},entrega:{ico:"📦",nome:"Entrega",dest:"Para onde entregar?",btn:"📦 Pedir entrega agora"}};
 let tipo=TIPOS[LS("cli_tipo")]?LS("cli_tipo"):"passageiro",orig=null,alvo="dest";
 async function criarCorrida(b){for(;;){try{return await api("corridas",{method:"POST",body:JSON.stringify(b)})}catch(e){const k=["tipo","origem_end","origem_lat","origem_lng"].find(x=>x in b&&e.message.includes(x));if(!k)throw e;delete b[k]}}}
-const origemDe=()=>{const o=orig||{lat:me.lat,lng:me.lng,end:"Minha localização"};return{origem_end:o.end,origem_lat:o.lat,origem_lng:o.lng}};
+let meEnd=null;
+async function enderecoMe(){
+  if(meEnd&&hav(me.lat,me.lng,meEnd.lat,meEnd.lng)<.05)return meEnd.end;
+  let end="Localização do cliente",ok=false;
+  try{
+    const ct=new AbortController(),t=setTimeout(()=>ct.abort(),4000);
+    const r=await(await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1&accept-language=pt-BR&lat=${me.lat}&lon=${me.lng}`,{signal:ct.signal})).json();clearTimeout(t);
+    const a=r.address||{},rua=a.road||a.pedestrian||a.residential||a.footway,bairro=a.suburb||a.neighbourhood;
+    if(rua){end=rua+(a.house_number?", "+a.house_number:"")+(bairro?" - "+bairro:"");ok=true}
+    else if(r.display_name){end=r.display_name.split(",").slice(0,3).join(",").trim();ok=true}
+  }catch(e){}
+  if(ok)meEnd={lat:me.lat,lng:me.lng,end};
+  return end;
+}
+const origemDe=async()=>({origem_end:await enderecoMe(),origem_lat:me.lat,origem_lng:me.lng});
 let ultima=[],reenviando=false,me={lat:-27.816,lng:-50.326},map=null,layers={},dest=null,rota=null,poller=null,anim=null;
 let lay=+LS("cli_lay")||0,tile=null,tracking=false,follow=false,rmBusy=false,rmFrom=null;
 const icoMe=L.divIcon({html:'<div class="me"></div>',className:"",iconSize:[18,18],iconAnchor:[9,9]});
@@ -210,13 +224,8 @@ function marcaOrig(){
 }
 function pontosUI(){
   document.querySelectorAll(".tp").forEach(b=>b.classList.toggle("on",b.dataset.t===tipo));
-  if(!$("pO"))return;
-  $("pOt").textContent=tipo==="entrega"?"Coleta":"Embarque";
-  $("pOs").textContent=orig?orig.end:"Minha localização";
-  $("pDs").textContent=dest?dest.end:"Escolha abaixo";
-  $("pO").classList.toggle("on",alvo==="orig");$("pD").classList.toggle("on",alvo==="dest");
-  $("qLbl").textContent=alvo==="orig"?(tipo==="entrega"?"Onde coletar o item?":"Onde você vai embarcar?"):TIPOS[tipo].dest;
-  $("agora").textContent=TIPOS[tipo].btn;
+  if($("qLbl"))$("qLbl").textContent=TIPOS[tipo].dest;
+  if($("agora"))$("agora").textContent=TIPOS[tipo].btn;
 }
 async function tracar(){
   marcaOrig();
@@ -231,8 +240,7 @@ async function tracar(){
 }
 async function definirDestino(lat,lng,end){
   const pt={lat,lng,end};fechaSug();salvaRecente(pt);
-  if(alvo==="orig")orig=pt;else dest=pt;
-  alvo="dest";pontosUI();
+  dest=pt;pontosUI();
   await tracar();
 }
 function mover(p){
@@ -303,7 +311,6 @@ function home(){
   $("app").innerHTML=`
   <div class="card"><div class="tps"><button class="tp" data-t="passageiro"><span>🧍</span>Passageiro<small>Levar você</small></button><button class="tp" data-t="entrega"><span>📦</span>Entrega<small>Levar um item</small></button></div></div>
   <div class="card">
-    <div class="tps" style="margin-bottom:12px"><button class="pt" id="pO"><span>🟢</span><b id="pOt">Embarque</b><small id="pOs">Minha localização</small></button><button class="pt" id="pD"><span>🏁</span><b>Destino final</b><small id="pDs">Escolha abaixo</small></button></div>
     <label class="lbl" for="q" id="qLbl">Para onde vamos?</label>
     <div class="row" style="position:relative"><input id="q" placeholder="Endereço ou lugar" enterkeyhint="search" autocomplete="off"><button class="btn sm" id="go">Buscar</button><div id="sug"></div></div>
     ${mapHtml()}
@@ -319,8 +326,6 @@ function home(){
   <div id="lista"><div class="empty">Procurando motoboys…</div></div>${histHtml()}`;
   dest=null;rota=null;orig=null;alvo="dest";
   document.querySelectorAll(".tp").forEach(b=>b.onclick=()=>{tipo=b.dataset.t;localStorage.setItem("cli_tipo",tipo);pontosUI()});
-  $("pO").onclick=()=>{if(alvo==="orig"){orig=null;alvo="dest";pontosUI();tracar()}else{alvo="orig";pontosUI();$("info").textContent="Busque ou toque no mapa. Toque em Embarque/Coleta de novo para usar sua localização.";$("q").focus()}};
-  $("pD").onclick=()=>{alvo="dest";pontosUI();$("q").focus()};
   pontosUI();
   initMap();
   $("go").onclick=buscar;
@@ -375,7 +380,8 @@ async function chamar(m,btn){
   localStorage.setItem("cli_nome",nome);localStorage.setItem("cli_tel",tel);localStorage.setItem("oferta",+($("oferta")&&$("oferta").value)>0?"1":"0");
   btn.disabled=true;btn.textContent="Chamando…";
   try{
-    const r=await criarCorrida({motoboy_id:m.id,cliente_nome:nome,cliente_tel:tel,destino_end:dest.end,destino_lat:dest.lat,destino_lng:dest.lng,distancia_km:+rota.km.toFixed(2),valor:valorPara(m),status:"pendente",tipo,...origemDe()});
+    const og=await origemDe();
+    const r=await criarCorrida({motoboy_id:m.id,cliente_nome:nome,cliente_tel:tel,destino_end:dest.end,destino_lat:dest.lat,destino_lng:dest.lng,distancia_km:+rota.km.toFixed(2),valor:valorPara(m),status:"pendente",tipo,...og});
     localStorage.setItem("corrida_id",r[0].id);
     acompanhar();
   }catch(e){
