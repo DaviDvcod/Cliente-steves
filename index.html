@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#FF7A1A">
+<title>Corre Já</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{--bg:#f5f4f2;--card:#fff;--tx:#1b1f23;--mut:#6b737b;--acc:#ff7a1a;--ok:#22a861;--bad:#e5484d;--bd:#e6e3df}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh}
+header{position:sticky;top:0;z-index:1000;background:var(--bg);padding:calc(env(safe-area-inset-top,0px) + 14px) 18px 12px;border-bottom:1px solid var(--bd)}
+header b{font-size:22px;letter-spacing:-.02em}
+header b span{color:var(--acc)}
+main{max-width:520px;margin:0 auto;padding:14px 16px calc(env(safe-area-inset-bottom,0px) + 30px)}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:20px;padding:16px;margin-bottom:12px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.k{color:var(--mut);font-size:13px}
+.val{font-size:22px;font-weight:800;color:var(--acc)}
+.sec{font-weight:700;font-size:18px;margin:16px 2px 10px}
+input{width:100%;min-height:48px;padding:12px 14px;border:1px solid var(--bd);border-radius:14px;background:#fff;color:var(--tx);font:inherit;outline:none}
+input:focus-visible,button:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+label.lbl{font-size:14px;font-weight:600;color:var(--mut);display:block;margin:2px 0 8px}
+.btn{border:0;background:var(--acc);color:#fff;min-height:50px;padding:12px 20px;border-radius:14px;font-size:16px;font-weight:700;cursor:pointer;width:100%}
+.btn.sm{width:auto;white-space:nowrap}
+.btn.ghost{background:transparent;border:1px solid var(--bd);color:var(--tx)}
+.btn.bad{background:var(--bad)}
+.btn:disabled{opacity:.5}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.pill{display:inline-block;font-size:13px;font-weight:700;padding:5px 11px;border-radius:9px}
+.pill.ok{background:#e3f6ec;color:var(--ok)}
+.pill.warn{background:#fff1e0;color:#c76a0a}
+.pill.bad{background:#fde8e8;color:var(--bad)}
+#map{height:260px;border-radius:16px;overflow:hidden;margin:12px 0 10px;border:1px solid var(--bd);z-index:0}
+.empty{color:var(--mut);text-align:center;padding:28px 10px}
+.me{width:18px;height:18px;border-radius:50%;background:#2f7cf6;border:3px solid #fff;box-shadow:0 0 0 2px rgba(47,124,246,.3),0 1px 4px rgba(0,0,0,.4)}
+.em{font-size:26px;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,.4))}
+a.wa{color:var(--ok);text-decoration:none;font-weight:600}
+#toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);background:var(--tx);color:#fff;padding:11px 18px;border-radius:12px;font-size:14px;font-weight:600;opacity:0;transition:.25s;z-index:2000;pointer-events:none;max-width:88vw;text-align:center}
+#toast.show{transform:translate(-50%,0);opacity:1}
+</style>
+</head>
+<body>
+<header><b>🛵 Corre <span>Já</span></b></header>
+<main id="app"></main>
+<div id="toast"></div>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+"use strict";
+const SB="https://bkjywijgogeyekwgqawq.supabase.co",KEY="sb_publishable_v8SlYZngr9uQ0vpBxlPDPg_GBKN_-Or";
+const $=id=>document.getElementById(id);
+const LS=k=>localStorage.getItem(k);
+const brl=n=>(+n||0).toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let tT=null;
+function toast(m){const t=$("toast");t.textContent=m;t.classList.add("show");clearTimeout(tT);tT=setTimeout(()=>t.classList.remove("show"),2800)}
+async function api(path,opt={}){
+  const r=await fetch(SB+"/rest/v1/"+path,{...opt,headers:{apikey:KEY,...(KEY.startsWith("eyJ")?{Authorization:"Bearer "+KEY}:{}),"Content-Type":"application/json",Prefer:opt.prefer||"return=representation",...(opt.headers||{})}});
+  if(!r.ok)throw new Error("erro "+r.status+": "+(await r.text()).slice(0,160));
+  return (r.headers.get("content-type")||"").includes("json")?r.json():null;
+}
+const hav=(a,b,c,d)=>{const r=x=>x*Math.PI/180,p=Math.sin(r(c-a)/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(r(d-b)/2)**2;return 2*6371*Math.asin(Math.sqrt(p))};
+const soDig=t=>{const d=String(t||"").replace(/\D/g,"");return d.length<=11?"55"+d:d};
+
+let me={lat:-27.816,lng:-50.326},map=null,layers={},dest=null,rota=null,poller=null,anim=null;
+const icoMe=L.divIcon({html:'<div class="me"></div>',className:"",iconSize:[18,18],iconAnchor:[9,9]});
+const icoFlag=L.divIcon({html:'<div class="em">🏁</div>',className:"",iconSize:[30,30],iconAnchor:[6,28]});
+const icoMoto=L.divIcon({html:'<div class="em">🏍️</div>',className:"",iconSize:[30,30],iconAnchor:[15,15]});
+
+function initMap(){
+  if(map){map.remove();map=null}
+  layers={};
+  map=L.map("map",{zoomControl:false}).setView([me.lat,me.lng],14);
+  map.attributionControl.setPrefix(false);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(map);
+  layers.me=L.marker([me.lat,me.lng],{icon:icoMe}).addTo(map);
+}
+async function rotaReal(a,b){
+  try{
+    const r=await (await fetch(`https://router.project-osrm.org/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=geojson`)).json();
+    const t=r.routes[0];
+    return{km:t.distance/1000,min:Math.max(1,Math.round(t.duration/60)),pts:t.geometry.coordinates.map(c=>[c[1],c[0]])};
+  }catch(e){return{km:hav(a.lat,a.lng,b.lat,b.lng),min:0,pts:[[a.lat,a.lng],[b.lat,b.lng]]}}
+}
+function desenhar(){
+  ["line","flag"].forEach(k=>{if(layers[k]){map.removeLayer(layers[k]);delete layers[k]}});
+  layers.line=L.polyline(rota.pts,{color:"#ff7a1a",weight:5,opacity:.9}).addTo(map);
+  layers.flag=L.marker([dest.lat,dest.lng],{icon:icoFlag}).addTo(map);
+  map.fitBounds(layers.line.getBounds().extend([me.lat,me.lng]),{padding:[30,30]});
+}
+
+function home(){
+  clearInterval(poller);
+  $("app").innerHTML=`
+  <div class="card">
+    <label class="lbl" for="q">Para onde vamos?</label>
+    <div class="row"><input id="q" placeholder="Endereço ou lugar" enterkeyhint="search"><button class="btn sm" id="go">Buscar</button></div>
+    <div id="map"></div>
+    <div id="info" class="k">Digite o destino e toque em Buscar.</div>
+  </div>
+  <div class="card">
+    <label class="lbl">Seus dados (o motoboy vê)</label>
+    <div class="grid2"><input id="nome" placeholder="Seu nome" value="${esc(LS("cli_nome")||"")}"><input id="tel" type="tel" placeholder="WhatsApp" value="${esc(LS("cli_tel")||"")}"></div>
+  </div>
+  <div class="sec">🏍️ Motoboys disponíveis</div>
+  <div id="lista"><div class="empty">Procurando motoboys…</div></div>`;
+  dest=null;rota=null;
+  initMap();
+  $("go").onclick=buscar;
+  $("q").onkeydown=e=>{if(e.key==="Enter")buscar()};
+  listar();
+  poller=setInterval(listar,8000);
+}
+
+async function buscar(){
+  const q=$("q").value.trim();if(!q)return;
+  $("go").disabled=true;$("info").textContent="Buscando…";
+  try{
+    const vb=[me.lng-.5,me.lat+.5,me.lng+.5,me.lat-.5].join(",");
+    const r=await (await fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=br&accept-language=pt-BR&viewbox="+vb+"&q="+encodeURIComponent(q))).json();
+    if(!r.length){$("info").textContent="Endereço não encontrado. Tente incluir a cidade.";return}
+    dest={lat:+r[0].lat,lng:+r[0].lon,end:r[0].display_name.split(",").slice(0,3).join(",").trim()};
+    rota=await rotaReal(me,dest);
+    desenhar();
+    $("info").innerHTML=`🛣️ ${rota.km.toFixed(1)} km de rota${rota.min?` · 🕐 ~${rota.min} min`:""} até ${esc(dest.end)}`;
+    listar();
+  }catch(e){$("info").textContent="Não foi possível buscar agora. Tente de novo."}
+  finally{$("go").disabled=false}
+}
+
+async function listar(){
+  const box=$("lista");if(!box)return;
+  let l=[];
+  try{l=await api("motoboys?online=eq.true&select=*")}catch(e){box.innerHTML='<div class="empty">Sem conexão. Verifique a internet.</div>';return}
+  const lim=Date.now()-10*60000;
+  l=l.filter(m=>m.lat!=null&&m.lng!=null&&(!m.atualizado_em||new Date(m.atualizado_em).getTime()>lim));
+  l.forEach(m=>m.d=hav(me.lat,me.lng,m.lat,m.lng));
+  l.sort((a,b)=>a.d-b.d);
+  if(!l.length){box.innerHTML='<div class="empty">Nenhum motoboy online no momento.</div>';return}
+  box.innerHTML=l.map(m=>`<div class="card">
+    <div class="row"><div><b>${esc(m.nome)}</b><div class="k">a ${m.d.toFixed(1)} km de você · ${brl(m.preco_km)}/km</div></div><div class="val">${rota?brl(rota.km*m.preco_km):""}</div></div>
+    <button class="btn" style="margin-top:12px" data-m="${esc(m.id)}" ${rota?"":"disabled"}>${rota?"Chamar":"Escolha um destino"}</button></div>`).join("");
+  box.querySelectorAll("[data-m]").forEach(b=>b.onclick=()=>chamar(l.find(m=>String(m.id)===b.dataset.m),b));
+}
+
+async function chamar(m,btn){
+  const nome=$("nome").value.trim(),tel=$("tel").value.trim();
+  if(!nome){toast("Informe seu nome");$("nome").focus();return}
+  localStorage.setItem("cli_nome",nome);localStorage.setItem("cli_tel",tel);
+  btn.disabled=true;btn.textContent="Chamando…";
+  try{
+    const r=await api("corridas",{method:"POST",body:JSON.stringify({motoboy_id:m.id,cliente_nome:nome,cliente_tel:tel,destino_end:dest.end,destino_lat:dest.lat,destino_lng:dest.lng,distancia_km:+rota.km.toFixed(2),valor:+(rota.km*m.preco_km).toFixed(2),status:"pendente"})});
+    localStorage.setItem("corrida_id",r[0].id);
+    acompanhar();
+  }catch(e){toast("Erro: "+e.message);btn.disabled=false;btn.textContent="Chamar"}
+}
+
+const ST={pendente:["⏳ Aguardando o motoboy aceitar","warn"],aceita:["✅ Motoboy aceitou","ok"],a_caminho:["🏍️ Motoboy a caminho","ok"],concluida:["🏁 Corrida concluída","ok"],recusada:["✖ O motoboy recusou","bad"],cancelada:["Corrida cancelada","bad"]};
+function mover(p){
+  if(!layers.moto){layers.moto=L.marker(p,{icon:icoMoto}).addTo(map);return}
+  const a=layers.moto.getLatLng(),t0=performance.now();
+  cancelAnimationFrame(anim);
+  const f=t=>{const k=Math.min(1,(t-t0)/1500);layers.moto.setLatLng([a.lat+(p[0]-a.lat)*k,a.lng+(p[1]-a.lng)*k]);if(k<1)anim=requestAnimationFrame(f)};
+  anim=requestAnimationFrame(f);
+}
+function acompanhar(){
+  clearInterval(poller);
+  const id=LS("corrida_id");if(!id){home();return}
+  $("app").innerHTML=`<div class="card">
+    <div class="row"><span class="pill" id="st">…</span><span class="val" id="vl"></span></div>
+    <div id="map"></div>
+    <div id="dt"></div><div id="ac" style="margin-top:12px"></div></div>`;
+  initMap();
+  let lastSt=null,fit=false;
+  const tick=async()=>{
+    let c,m=null;
+    try{c=(await api("corridas?id=eq."+encodeURIComponent(id)+"&select=*"))[0]}catch(e){return}
+    if(!c){localStorage.removeItem("corrida_id");home();return}
+    if(!$("st"))return;
+    if(!dest){
+      dest={lat:+c.destino_lat,lng:+c.destino_lng,end:c.destino_end};
+      rota=await rotaReal(me,dest);desenhar();
+    }
+    try{m=(await api("motoboys?id=eq."+encodeURIComponent(c.motoboy_id)+"&select=*"))[0]}catch(e){}
+    const [txt,cls]=ST[c.status]||[c.status,"warn"];
+    $("st").textContent=txt;$("st").className="pill "+cls;
+    $("vl").textContent=brl(c.valor);
+    const wa=m&&m.telefone?` · <a class="wa" target="_blank" rel="noopener" href="https://wa.me/${soDig(m.telefone)}">💬 Falar com o motoboy</a>`:"";
+    $("dt").innerHTML=`<div class="k">📍 ${esc(c.destino_end||"")}</div><div class="k">${(+c.distancia_km).toFixed(1)} km${m?" · "+esc(m.nome):""}${wa}</div>`;
+    if(m&&m.lat!=null&&m.lng!=null&&["aceita","a_caminho","pendente"].includes(c.status)){
+      mover([m.lat,m.lng]);
+      if(!fit){fit=true;map.fitBounds(L.latLngBounds([[me.lat,me.lng],[dest.lat,dest.lng],[m.lat,m.lng]]),{padding:[30,30]})}
+    }
+    if(c.status!==lastSt){
+      lastSt=c.status;
+      const fim=["concluida","recusada","cancelada"].includes(c.status);
+      $("ac").innerHTML=fim?'<button class="btn" id="nova">Nova corrida</button>':'<button class="btn bad" id="canc">Cancelar pedido</button>';
+      if(fim){clearInterval(poller);$("nova").onclick=()=>{localStorage.removeItem("corrida_id");home()}}
+      else $("canc").onclick=async()=>{
+        $("canc").disabled=true;
+        try{await api("corridas?id=eq."+encodeURIComponent(id),{method:"PATCH",body:JSON.stringify({status:"cancelada",atualizado_em:new Date().toISOString()}),prefer:"return=minimal"});toast("Pedido cancelado");tick()}
+        catch(e){toast("Erro: "+e.message);$("canc").disabled=false}
+      };
+    }
+  };
+  tick();
+  poller=setInterval(tick,4000);
+}
+
+function start(){LS("corrida_id")?acompanhar():home()}
+if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").catch(()=>{});
+if(navigator.geolocation){
+  navigator.geolocation.getCurrentPosition(p=>{me.lat=p.coords.latitude;me.lng=p.coords.longitude;start()},()=>{toast("Ative a localização para ver motoboys perto de você");start()},{enableHighAccuracy:true,timeout:10000});
+}else start();
+</script>
+</body>
+</html>
