@@ -304,14 +304,14 @@ async function chamar(m,btn){
   }catch(e){toast("Erro: "+e.message);btn.disabled=false;btn.textContent="Chamar"}
 }
 
-const ST={pendente:["⏳ Aguardando o motoboy aceitar","warn"],aceita:["✅ Motoboy aceitou","ok"],a_caminho:["🏍️ Motoboy a caminho","ok"],concluida:["🏁 Corrida concluída","ok"],recusada:["✖ O motoboy recusou","bad"],cancelada:["Corrida cancelada","bad"]};
+const ST={pendente:["⏳ Aguardando o motoboy aceitar","warn"],proposta:["💬 O motoboy fez uma proposta","warn"],aceita:["✅ Motoboy aceitou","ok"],a_caminho:["🏍️ Motoboy a caminho","ok"],concluida:["🏁 Corrida concluída","ok"],recusada:["✖ O motoboy recusou","bad"],cancelada:["Corrida cancelada","bad"]};
 function acompanhar(){
   clearInterval(poller);tracking=true;
   const id=LS("corrida_id");if(!id){home();return}
   $("app").innerHTML=`<div class="card">
     <div class="row"><span class="pill" id="st">…</span><span class="val" id="vl"></span></div>
     ${mapHtml()}
-    <div id="dt"></div><div id="ac" style="margin-top:12px"></div></div>`;
+    <div id="dt"></div><div id="prop"></div><div id="ac" style="margin-top:12px"></div></div>`;
   initMap();
   let lastSt=null,fit=false;
   const tick=async()=>{
@@ -319,7 +319,7 @@ function acompanhar(){
     try{c=(await api("corridas?id=eq."+encodeURIComponent(id)+"&select=*"))[0]}catch(e){return}
     if(!c){localStorage.removeItem("corrida_id");home();return}
     if(!$("st"))return;
-    if(LS("auto")==="1"&&(c.status==="recusada"||(c.status==="pendente"&&Date.now()-new Date(c.criado_em).getTime()>45000))){
+    if(LS("auto")==="1"&&(c.status==="recusada"||(c.status==="pendente"&&!(+c.rodada>0)&&Date.now()-new Date(c.criado_em).getTime()>45000))){
       if(c.status==="pendente")api("corridas?id=eq."+encodeURIComponent(id),{method:"PATCH",body:JSON.stringify({status:"cancelada",atualizado_em:new Date().toISOString()}),prefer:"return=minimal"}).catch(()=>{});
       reenviar(c);return;
     }
@@ -331,6 +331,16 @@ function acompanhar(){
     const [txt,cls]=ST[c.status]||[c.status,"warn"];
     $("st").textContent=txt;$("st").className="pill "+cls;
     $("vl").textContent=brl(c.valor);
+    const pr=$("prop");
+    if(c.status==="proposta"){
+      const k="p"+c.rodada+":"+c.contra_valor;
+      if(pr.dataset.k!==k){
+        pr.dataset.k=k;
+        pr.innerHTML=`<div class="card" style="border-color:var(--acc);background:#fff8f0;margin:12px 0 0"><div class="k">💬 Proposta do motoboy (${+c.rodada||1} de 3)</div><div class="val" style="font-size:32px">${brl(c.contra_valor)}</div><div class="k">Seu pedido: ${brl(c.valor)}</div><div class="grid2" style="margin-top:12px"><button class="btn" id="pAc">✅ Aceitar</button><button class="btn ghost" id="pRe">✖ Recusar</button></div></div>`;
+        $("pAc").onclick=()=>responderProposta(id,c,true);
+        $("pRe").onclick=()=>responderProposta(id,c,false);
+      }
+    }else{pr.innerHTML="";pr.dataset.k=""}
     const wa=m&&m.telefone?` · <a class="wa" target="_blank" rel="noopener" href="https://wa.me/${soDig(m.telefone)}">💬 Falar com o motoboy</a>`:"";
     $("dt").innerHTML=`<div class="k">📍 ${esc(c.destino_end||"")}</div><div class="k">${(+c.distancia_km).toFixed(1)} km${m?" · "+esc(m.nome):""}${wa}</div>`;
     if(m&&m.lat!=null&&m.lng!=null&&["aceita","a_caminho","pendente"].includes(c.status)){
@@ -355,6 +365,16 @@ function acompanhar(){
   poller=setInterval(tick,4000);
 }
 
+async function responderProposta(id,c,ok){
+  document.querySelectorAll("#pAc,#pRe").forEach(b=>b.disabled=true);
+  const body=ok?{valor:+c.contra_valor,status:"aceita"}:{status:"pendente",contra_valor:null};
+  body.atualizado_em=new Date().toISOString();
+  try{
+    await api("corridas?id=eq."+encodeURIComponent(id),{method:"PATCH",body:JSON.stringify(body),prefer:"return=minimal"});
+    toast(ok?"Proposta aceita ✓":(+c.rodada<3?"Proposta recusada. O motoboy pode negociar de novo.":"Proposta recusada."));
+    $("prop").innerHTML="";
+  }catch(e){toast("Erro: "+e.message);document.querySelectorAll("#pAc,#pRe").forEach(b=>b.disabled=false)}
+}
 async function reenviar(c){
   if(reenviando)return;reenviando=true;
   try{
