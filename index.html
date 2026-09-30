@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#FF7A1A">
-<title>Corre Já</title>
+<title>STEVEFLASH</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -35,9 +35,21 @@ label.lbl{font-size:14px;font-weight:600;color:var(--mut);display:block;margin:2
 .pill.ok{background:#e3f6ec;color:var(--ok)}
 .pill.warn{background:#fff1e0;color:#c76a0a}
 .pill.bad{background:#fde8e8;color:var(--bad)}
-#map{height:260px;border-radius:16px;overflow:hidden;margin:12px 0 10px;border:1px solid var(--bd);z-index:0}
+/* MAPA */
+#mapWrap{position:relative;margin:12px 0 10px}
+#map{height:300px;border-radius:16px;overflow:hidden;border:1px solid var(--bd);z-index:0;background:#e8e6e2}
+#map.dk .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.9) contrast(.9)}
+#mapWrap.full{position:fixed;inset:0;z-index:1500;margin:0}
+#mapWrap.full #map{height:100%;border-radius:0;border:0}
+.mb{position:absolute;right:10px;z-index:1000;width:44px;height:44px;border-radius:12px;border:1px solid var(--bd);background:#fff;color:var(--tx);font-size:19px;cursor:pointer;box-shadow:0 2px 8px #0003;padding:0}
+#mapWrap.full .mb{margin-top:env(safe-area-inset-top,0px)}
+#bFull{top:10px}#bLay{top:62px}#bCen{top:114px}#bCen.on{color:var(--acc);border-color:var(--acc)}
+#mInfo{position:absolute;left:10px;right:64px;bottom:10px;z-index:1000;background:rgba(255,255,255,.95);border:1px solid var(--bd);border-radius:12px;padding:9px 12px;font-size:13px;display:none;box-shadow:0 2px 8px #0003}
+#mapWrap.full #mInfo{bottom:calc(env(safe-area-inset-bottom,0px) + 10px)}
+#mInfo b{color:var(--acc);font-size:15px}
 .empty{color:var(--mut);text-align:center;padding:28px 10px}
 .me{width:18px;height:18px;border-radius:50%;background:#2f7cf6;border:3px solid #fff;box-shadow:0 0 0 2px rgba(47,124,246,.3),0 1px 4px rgba(0,0,0,.4)}
+.mo{width:34px;height:34px;border-radius:50%;background:var(--acc);border:3px solid #fff;box-shadow:0 0 0 7px rgba(255,122,26,.25),0 2px 8px #0008;display:flex;align-items:center;justify-content:center;color:#fff;font-size:15px;transition:transform .4s}
 .em{font-size:26px;line-height:1;filter:drop-shadow(0 1px 2px rgba(0,0,0,.4))}
 a.wa{color:var(--ok);text-decoration:none;font-weight:600}
 #toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);background:var(--tx);color:#fff;padding:11px 18px;border-radius:12px;font-size:14px;font-weight:600;opacity:0;transition:.25s;z-index:2000;pointer-events:none;max-width:88vw;text-align:center}
@@ -45,7 +57,7 @@ a.wa{color:var(--ok);text-decoration:none;font-weight:600}
 </style>
 </head>
 <body>
-<header><b>🛵 Corre <span>Já</span></b></header>
+<header><b>🛵 STEVE<span>FLASH</span></b></header>
 <main id="app"></main>
 <div id="toast"></div>
 <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -64,20 +76,59 @@ async function api(path,opt={}){
   return (r.headers.get("content-type")||"").includes("json")?r.json():null;
 }
 const hav=(a,b,c,d)=>{const r=x=>x*Math.PI/180,p=Math.sin(r(c-a)/2)**2+Math.cos(r(a))*Math.cos(r(c))*Math.sin(r(d-b)/2)**2;return 2*6371*Math.asin(Math.sqrt(p))};
+const brg=(a,b)=>{const r=x=>x*Math.PI/180,dl=r(b[1]-a[1]),y=Math.sin(dl)*Math.cos(r(b[0])),x=Math.cos(r(a[0]))*Math.sin(r(b[0]))-Math.sin(r(a[0]))*Math.cos(r(b[0]))*Math.cos(dl);return(Math.atan2(y,x)*180/Math.PI+360)%360};
 const soDig=t=>{const d=String(t||"").replace(/\D/g,"");return d.length<=11?"55"+d:d};
 
+/* ====== MAPA AVANÇADO ====== */
+const CAMADAS=[
+  {n:"Claro",u:"https://tile.openstreetmap.org/{z}/{x}/{y}.png",z:19},
+  {n:"Escuro",u:"https://tile.openstreetmap.org/{z}/{x}/{y}.png",dk:1,z:19},
+  {n:"Satélite",u:"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",z:18}
+];
 let me={lat:-27.816,lng:-50.326},map=null,layers={},dest=null,rota=null,poller=null,anim=null;
+let lay=+LS("cli_lay")||0,tile=null,tracking=false,follow=false,rmBusy=false,rmFrom=null;
 const icoMe=L.divIcon({html:'<div class="me"></div>',className:"",iconSize:[18,18],iconAnchor:[9,9]});
 const icoFlag=L.divIcon({html:'<div class="em">🏁</div>',className:"",iconSize:[30,30],iconAnchor:[6,28]});
 const icoMoto=L.divIcon({html:'<div class="em">🏍️</div>',className:"",iconSize:[30,30],iconAnchor:[15,15]});
+const icoArrow=L.divIcon({html:'<div class="mo">▲</div>',className:"",iconSize:[34,34],iconAnchor:[17,17]});
+const mapHtml=()=>`<div id="mapWrap"><div id="map"></div><button class="mb" id="bFull" aria-label="Tela cheia">⤢</button><button class="mb" id="bLay" aria-label="Trocar mapa">🗺️</button><button class="mb" id="bCen" aria-label="Centralizar">🎯</button><div id="mInfo"></div></div>`;
 
+function setLayer(i){
+  lay=(i+CAMADAS.length)%CAMADAS.length;localStorage.setItem("cli_lay",lay);
+  const c=CAMADAS[lay];
+  if(tile)map.removeLayer(tile);
+  tile=L.tileLayer(c.u,{maxZoom:c.z,maxNativeZoom:c.z,attribution:"© OpenStreetMap / Esri"}).addTo(map);
+  tile.bringToBack();
+  $("map").classList.toggle("dk",!!c.dk);
+}
 function initMap(){
   if(map){map.remove();map=null}
-  layers={};
-  map=L.map("map",{zoomControl:false}).setView([me.lat,me.lng],14);
+  layers={};rmFrom=null;follow=false;
+  map=L.map("map",{zoomControl:false,zoomSnap:.5,preferCanvas:true}).setView([me.lat,me.lng],14);
   map.attributionControl.setPrefix(false);
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(map);
+  setLayer(lay);
+  L.control.scale({imperial:false,position:"bottomleft"}).addTo(map);
+  layers.acc=L.circle([me.lat,me.lng],{radius:0,color:"#2f7cf6",weight:1,fillOpacity:.1,interactive:false}).addTo(map);
   layers.me=L.marker([me.lat,me.lng],{icon:icoMe}).addTo(map);
+  layers.ms=L.layerGroup().addTo(map);
+  map.on("dragstart",()=>{follow=false;$("bCen").classList.remove("on")});
+  $("bLay").onclick=()=>{setLayer(lay+1);toast("Mapa: "+CAMADAS[lay].n)};
+  $("bFull").onclick=()=>{
+    const w=$("mapWrap"),f=w.classList.toggle("full");
+    $("bFull").textContent=f?"✕":"⤢";document.body.style.overflow=f?"hidden":"";
+    setTimeout(()=>map.invalidateSize(),60);
+  };
+  $("bCen").onclick=()=>{
+    if(tracking&&layers.moto){follow=true;$("bCen").classList.add("on");map.setView(layers.moto.getLatLng(),16,{animate:true})}
+    else map.setView([me.lat,me.lng],15,{animate:true});
+  };
+  if(!tracking)map.on("click",async e=>{
+    const{lat,lng}=e.latlng;$("info").textContent="Buscando endereço…";
+    let end="Local no mapa";
+    try{const r=await(await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&accept-language=pt-BR&lat=${lat}&lon=${lng}`)).json();
+      if(r&&r.display_name)end=r.display_name.split(",").slice(0,3).join(",").trim()}catch(e){}
+    definirDestino(lat,lng,end);
+  });
 }
 async function rotaReal(a,b){
   try{
@@ -87,20 +138,60 @@ async function rotaReal(a,b){
   }catch(e){return{km:hav(a.lat,a.lng,b.lat,b.lng),min:0,pts:[[a.lat,a.lng],[b.lat,b.lng]]}}
 }
 function desenhar(){
-  ["line","flag"].forEach(k=>{if(layers[k]){map.removeLayer(layers[k]);delete layers[k]}});
-  layers.line=L.polyline(rota.pts,{color:"#ff7a1a",weight:5,opacity:.9}).addTo(map);
+  ["line","glow","flag"].forEach(k=>{if(layers[k]){map.removeLayer(layers[k]);delete layers[k]}});
+  if(tracking)layers.line=L.polyline(rota.pts,{color:"#9aa3ab",weight:4,dashArray:"6 8",opacity:.85}).addTo(map);
+  else{
+    layers.glow=L.polyline(rota.pts,{color:"#ff7a1a",weight:12,opacity:.25,lineCap:"round"}).addTo(map);
+    layers.line=L.polyline(rota.pts,{color:"#ff7a1a",weight:5,opacity:.95,lineCap:"round",lineJoin:"round"}).addTo(map);
+  }
   layers.flag=L.marker([dest.lat,dest.lng],{icon:icoFlag}).addTo(map);
-  map.fitBounds(layers.line.getBounds().extend([me.lat,me.lng]),{padding:[30,30]});
+  map.fitBounds(layers.line.getBounds().extend([me.lat,me.lng]),{padding:[40,40]});
+}
+async function definirDestino(lat,lng,end){
+  dest={lat,lng,end};
+  $("info").textContent="Traçando rota…";
+  rota=await rotaReal(me,dest);
+  desenhar();
+  $("info").innerHTML=`🛣️ ${rota.km.toFixed(1)} km de rota${rota.min?` · 🕐 ~${rota.min} min`:""} até ${esc(dest.end)}`;
+  listar();
+}
+function mover(p){
+  if(!layers.moto){layers.moto=L.marker(p,{icon:icoArrow,zIndexOffset:1000}).addTo(map);return}
+  const a=layers.moto.getLatLng(),t0=performance.now(),el=layers.moto.getElement();
+  if(el&&hav(a.lat,a.lng,p[0],p[1])>.005)el.firstChild.style.transform="rotate("+brg([a.lat,a.lng],p)+"deg)";
+  if(follow)map.panTo(p,{animate:true,duration:1.2});
+  cancelAnimationFrame(anim);
+  const f=t=>{const k=Math.min(1,(t-t0)/1500);layers.moto.setLatLng([a.lat+(p[0]-a.lat)*k,a.lng+(p[1]-a.lng)*k]);if(k<1)anim=requestAnimationFrame(f)};
+  anim=requestAnimationFrame(f);
+}
+async function rotaMoto(m){
+  if(rmBusy||!dest)return;
+  if(rmFrom&&hav(m.lat,m.lng,rmFrom[0],rmFrom[1])<.1)return;
+  rmBusy=true;
+  const r=await rotaReal({lat:+m.lat,lng:+m.lng},dest);
+  rmBusy=false;
+  if(!map)return;
+  rmFrom=[+m.lat,+m.lng];
+  if(layers.rm){layers.rm.setLatLngs(r.pts);layers.rmG.setLatLngs(r.pts)}
+  else{
+    layers.rmG=L.polyline(r.pts,{color:"#ff7a1a",weight:12,opacity:.25,lineCap:"round"}).addTo(map);
+    layers.rm=L.polyline(r.pts,{color:"#ff7a1a",weight:5,opacity:.95,lineCap:"round",lineJoin:"round"}).addTo(map);
+  }
+  const i=$("mInfo");if(i){i.innerHTML=`<b>${r.km.toFixed(1)} km</b>${r.min?` · ~${r.min} min`:""} até o destino`;i.style.display="block"}
+}
+function limparRotaMoto(){
+  ["rm","rmG"].forEach(k=>{if(layers[k]){map.removeLayer(layers[k]);delete layers[k]}});
+  const i=$("mInfo");if(i)i.style.display="none";
 }
 
 function home(){
-  clearInterval(poller);
+  clearInterval(poller);tracking=false;
   $("app").innerHTML=`
   <div class="card">
     <label class="lbl" for="q">Para onde vamos?</label>
     <div class="row"><input id="q" placeholder="Endereço ou lugar" enterkeyhint="search"><button class="btn sm" id="go">Buscar</button></div>
-    <div id="map"></div>
-    <div id="info" class="k">Digite o destino e toque em Buscar.</div>
+    ${mapHtml()}
+    <div id="info" class="k">Digite o destino ou toque no mapa para escolher.</div>
   </div>
   <div class="card">
     <label class="lbl">Seus dados (o motoboy vê)</label>
@@ -123,11 +214,7 @@ async function buscar(){
     const vb=[me.lng-.5,me.lat+.5,me.lng+.5,me.lat-.5].join(",");
     const r=await (await fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=br&accept-language=pt-BR&viewbox="+vb+"&q="+encodeURIComponent(q))).json();
     if(!r.length){$("info").textContent="Endereço não encontrado. Tente incluir a cidade.";return}
-    dest={lat:+r[0].lat,lng:+r[0].lon,end:r[0].display_name.split(",").slice(0,3).join(",").trim()};
-    rota=await rotaReal(me,dest);
-    desenhar();
-    $("info").innerHTML=`🛣️ ${rota.km.toFixed(1)} km de rota${rota.min?` · 🕐 ~${rota.min} min`:""} até ${esc(dest.end)}`;
-    listar();
+    await definirDestino(+r[0].lat,+r[0].lon,r[0].display_name.split(",").slice(0,3).join(",").trim());
   }catch(e){$("info").textContent="Não foi possível buscar agora. Tente de novo."}
   finally{$("go").disabled=false}
 }
@@ -140,6 +227,10 @@ async function listar(){
   l=l.filter(m=>m.lat!=null&&m.lng!=null&&(!m.atualizado_em||new Date(m.atualizado_em).getTime()>lim));
   l.forEach(m=>m.d=hav(me.lat,me.lng,m.lat,m.lng));
   l.sort((a,b)=>a.d-b.d);
+  if(map&&layers.ms){
+    layers.ms.clearLayers();
+    l.forEach(m=>L.marker([+m.lat,+m.lng],{icon:icoMoto}).bindTooltip(esc(m.nome)+" · "+brl(m.preco_km)+"/km",{direction:"top",offset:[0,-14]}).addTo(layers.ms));
+  }
   if(!l.length){box.innerHTML='<div class="empty">Nenhum motoboy online no momento.</div>';return}
   box.innerHTML=l.map(m=>`<div class="card">
     <div class="row"><div><b>${esc(m.nome)}</b><div class="k">a ${m.d.toFixed(1)} km de você · ${brl(m.preco_km)}/km</div></div><div class="val">${rota?brl(rota.km*m.preco_km):""}</div></div>
@@ -160,19 +251,12 @@ async function chamar(m,btn){
 }
 
 const ST={pendente:["⏳ Aguardando o motoboy aceitar","warn"],aceita:["✅ Motoboy aceitou","ok"],a_caminho:["🏍️ Motoboy a caminho","ok"],concluida:["🏁 Corrida concluída","ok"],recusada:["✖ O motoboy recusou","bad"],cancelada:["Corrida cancelada","bad"]};
-function mover(p){
-  if(!layers.moto){layers.moto=L.marker(p,{icon:icoMoto}).addTo(map);return}
-  const a=layers.moto.getLatLng(),t0=performance.now();
-  cancelAnimationFrame(anim);
-  const f=t=>{const k=Math.min(1,(t-t0)/1500);layers.moto.setLatLng([a.lat+(p[0]-a.lat)*k,a.lng+(p[1]-a.lng)*k]);if(k<1)anim=requestAnimationFrame(f)};
-  anim=requestAnimationFrame(f);
-}
 function acompanhar(){
-  clearInterval(poller);
+  clearInterval(poller);tracking=true;
   const id=LS("corrida_id");if(!id){home();return}
   $("app").innerHTML=`<div class="card">
     <div class="row"><span class="pill" id="st">…</span><span class="val" id="vl"></span></div>
-    <div id="map"></div>
+    ${mapHtml()}
     <div id="dt"></div><div id="ac" style="margin-top:12px"></div></div>`;
   initMap();
   let lastSt=null,fit=false;
@@ -192,12 +276,14 @@ function acompanhar(){
     const wa=m&&m.telefone?` · <a class="wa" target="_blank" rel="noopener" href="https://wa.me/${soDig(m.telefone)}">💬 Falar com o motoboy</a>`:"";
     $("dt").innerHTML=`<div class="k">📍 ${esc(c.destino_end||"")}</div><div class="k">${(+c.distancia_km).toFixed(1)} km${m?" · "+esc(m.nome):""}${wa}</div>`;
     if(m&&m.lat!=null&&m.lng!=null&&["aceita","a_caminho","pendente"].includes(c.status)){
-      mover([m.lat,m.lng]);
-      if(!fit){fit=true;map.fitBounds(L.latLngBounds([[me.lat,me.lng],[dest.lat,dest.lng],[m.lat,m.lng]]),{padding:[30,30]})}
+      mover([+m.lat,+m.lng]);
+      if(!fit){fit=true;map.fitBounds(L.latLngBounds([[me.lat,me.lng],[dest.lat,dest.lng],[+m.lat,+m.lng]]),{padding:[40,40]})}
+      if(c.status!=="pendente")rotaMoto(m);
     }
     if(c.status!==lastSt){
       lastSt=c.status;
       const fim=["concluida","recusada","cancelada"].includes(c.status);
+      if(fim)limparRotaMoto();
       $("ac").innerHTML=fim?'<button class="btn" id="nova">Nova corrida</button>':'<button class="btn bad" id="canc">Cancelar pedido</button>';
       if(fim){clearInterval(poller);$("nova").onclick=()=>{localStorage.removeItem("corrida_id");home()}}
       else $("canc").onclick=async()=>{
@@ -212,9 +298,15 @@ function acompanhar(){
 }
 
 function start(){LS("corrida_id")?acompanhar():home()}
+function vigiar(){
+  navigator.geolocation.watchPosition(p=>{
+    me.lat=p.coords.latitude;me.lng=p.coords.longitude;
+    if(map&&layers.me){const ll=[me.lat,me.lng];layers.me.setLatLng(ll);layers.acc.setLatLng(ll).setRadius(Math.min(p.coords.accuracy||0,150))}
+  },null,{enableHighAccuracy:true,maximumAge:5000});
+}
 if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").catch(()=>{});
 if(navigator.geolocation){
-  navigator.geolocation.getCurrentPosition(p=>{me.lat=p.coords.latitude;me.lng=p.coords.longitude;start()},()=>{toast("Ative a localização para ver motoboys perto de você");start()},{enableHighAccuracy:true,timeout:10000});
+  navigator.geolocation.getCurrentPosition(p=>{me.lat=p.coords.latitude;me.lng=p.coords.longitude;start();vigiar()},()=>{toast("Ative a localização para ver motoboys perto de você");start()},{enableHighAccuracy:true,timeout:10000});
 }else start();
 </script>
 </body>
