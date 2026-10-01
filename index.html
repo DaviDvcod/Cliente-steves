@@ -262,10 +262,11 @@ async function rotaMoto(m,t,rot){
   rmBusy=false;
   if(!map)return;
   rmFrom=[+m.lat,+m.lng];
+  const az=rot&&rot!=="o destino";
   if(layers.rm){layers.rm.setLatLngs(r.pts);layers.rmG.setLatLngs(r.pts)}
   else{
-    layers.rmG=L.polyline(r.pts,{color:"#ff7a1a",weight:12,opacity:.25,lineCap:"round"}).addTo(map);
-    layers.rm=L.polyline(r.pts,{color:"#ff7a1a",weight:5,opacity:.95,lineCap:"round",lineJoin:"round"}).addTo(map);
+    layers.rmG=L.polyline(r.pts,{color:az?"#1e6fff":"#ff7a1a",weight:12,opacity:.25,lineCap:"round"}).addTo(map);
+    layers.rm=L.polyline(r.pts,{color:az?"#4da3ff":"#ff7a1a",weight:5,opacity:.95,lineCap:"round",lineJoin:"round"}).addTo(map);
   }
   const i=$("mInfo");if(i){i.innerHTML=`<b>${r.km.toFixed(1)} km</b>${r.min?` · ~${r.min} min`:""} até ${rot||"o destino"}`;i.style.display="block"}
 }
