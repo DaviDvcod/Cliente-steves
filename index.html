@@ -364,6 +364,8 @@ async function listar(){
   try{l=await api("motoboys?online=eq.true&select=id,nome,preco_km,lat,lng,atualizado_em")}catch(e){box.innerHTML='<div class="empty">Sem conexão. Verifique a internet.</div>';return}
   const lim=Date.now()-10*60000;
   l=l.filter(m=>m.lat!=null&&m.lng!=null&&(!m.atualizado_em||new Date(m.atualizado_em).getTime()>lim));
+  const RT={};
+  try{((await api("rotas?ativa=eq.true&select=*"))||[]).forEach(r=>{if(Date.now()-new Date(r.atualizado_em).getTime()<12*36e5)RT[r.motoboy_id]=r})}catch(e){}
   l.forEach(m=>m.d=hav(me.lat,me.lng,m.lat,m.lng));
   l.sort((a,b)=>a.d-b.d);ultima=l;
   if(map&&layers.ms){
@@ -372,7 +374,7 @@ async function listar(){
   }
   if(!l.length){box.innerHTML='<div class="empty">Nenhum motoboy online no momento.</div>';return}
   box.innerHTML=l.map(m=>`<div class="card">
-    <div class="row"><div><b>${esc(m.nome)}</b><div class="k">a ${m.d.toFixed(1)} km de você · ${brl(m.preco_km)}/km</div></div><div class="val">${rota?brl(valorPara(m)):""}</div></div>
+    <div class="row"><div><b>${esc(m.nome)}</b><div class="k">a ${m.d.toFixed(1)} km de você · ${brl(m.preco_km)}/km</div>${RT[m.id]?`<div class="k" style="margin-top:6px">🛣️ <b>Rota:</b> ${esc(RT[m.id].origem)} → ${esc(RT[m.id].destino)}${RT[m.id].saida?" · "+esc(RT[m.id].saida):""}</div>`:""}</div><div class="val">${rota?brl(valorPara(m)):""}</div></div>
     <button class="btn" style="margin-top:12px" data-m="${esc(m.id)}" ${rota?"":"disabled"}>${rota?"Chamar":"Escolha um destino"}</button></div>`).join("");
   box.querySelectorAll("[data-m]").forEach(b=>b.onclick=()=>{localStorage.setItem("auto","0");chamar(l.find(m=>String(m.id)===b.dataset.m),b)});
 }
