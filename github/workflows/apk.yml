@@ -10,9 +10,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - nome: cliente
-            titulo: STEVEFLASH
-            id: br.com.stevedrive.cliente
+          - nome: motoboysteves
+            titulo: motoboysteves
+            id: br.com.stevedrive.motoboysteves
             entrada: index.html
     steps:
       - uses: actions/checkout@v4
